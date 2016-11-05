@@ -45,14 +45,15 @@ struct watchman_root {
 
   struct watchman_ignore ignore;
 
+  /* config options loaded via json file */
+  json_ref config_file;
+  Configuration config;
+
   int trigger_settle{0};
   int gc_interval{0};
   int gc_age{0};
   int idle_reap_age{0};
 
-  /* config options loaded via json file */
-  json_ref config_file;
-  Configuration config;
 
   // Stream of broadcast unilateral items emitted by this root
   std::shared_ptr<watchman::Publisher> unilateralResponses;
@@ -105,11 +106,8 @@ struct watchman_root {
 
     uint32_t next_cmd_id{0};
 
-    // This is only read or written by process_triggers
-    uint32_t last_trigger_tick{0};
-
     time_t last_cmd_timestamp{0};
-    time_t last_reap_timestamp{0};
+    mutable time_t last_reap_timestamp{0};
 
     explicit Inner(
         const w_string& root_path,
@@ -132,6 +130,20 @@ struct watchman_root {
   bool cancel();
 
   void processPendingSymlinkTargets();
+
+  // Returns true if the caller should stop the watch.
+  bool considerReap() const;
+  void tearDown();
+  bool init(char** errmsg);
+  bool removeFromWatched();
+  bool applyIgnoreVCSConfiguration(char** errmsg);
+  bool start(char** errmsg);
+  void signalThreads();
+  bool stopWatch();
+  json_ref triggerListToJson() const;
+
+ private:
+  void applyIgnoreConfiguration();
 };
 
 struct write_locked_watchman_root {
@@ -179,7 +191,6 @@ bool w_root_resolve_for_client_mode(
 char* w_find_enclosing_root(const char* filename, char** relpath);
 
 void w_root_free_watched_roots(void);
-bool w_root_stop_watch(struct unlocked_watchman_root* unlocked);
 json_ref w_root_stop_watch_all(void);
 void w_root_reap(void);
 void w_root_delref(struct unlocked_watchman_root* unlocked);
@@ -212,26 +223,12 @@ void w_root_read_unlock(
     struct read_locked_watchman_root* locked,
     struct unlocked_watchman_root* unlocked);
 
-void* run_io_thread(void* arg);
-void* run_notify_thread(void* arg);
 void process_triggers(struct read_locked_watchman_root* lock);
-bool consider_reap(struct read_locked_watchman_root* lock);
-void remove_from_file_list(struct watchman_file* file);
-void free_file_node(struct watchman_file* file);
-void w_root_teardown(w_root_t* root);
-bool w_root_init(w_root_t* root, char** errmsg);
-bool remove_root_from_watched(
-    w_root_t* root /* don't care about locked state */);
-bool is_vcs_op_in_progress(struct read_locked_watchman_root* lock);
-extern const struct watchman_hash_funcs dirname_hash_funcs;
-void delete_dir(struct watchman_dir* dir);
 bool did_file_change(struct watchman_stat *saved, struct watchman_stat *fresh);
 void struct_stat_to_watchman_stat(const struct stat *st,
                                   struct watchman_stat *target);
-bool apply_ignore_vcs_configuration(w_root_t *root, char **errmsg);
 w_root_t *w_root_new(const char *path, char **errmsg);
 extern std::atomic<long> live_roots;
-bool root_start(w_root_t *root, char **errmsg);
 
 extern watchman::Synchronized<std::unordered_map<w_string, w_root_t*>>
     watched_roots;
@@ -242,7 +239,6 @@ bool root_resolve(
     bool* created,
     char** errmsg,
     struct unlocked_watchman_root* unlocked);
-void signal_root_threads(w_root_t* root);
 
 void set_poison_state(
     const w_string& dir,

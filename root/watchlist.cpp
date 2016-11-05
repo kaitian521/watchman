@@ -8,18 +8,17 @@
 watchman::Synchronized<std::unordered_map<w_string, w_root_t*>> watched_roots;
 std::atomic<long> live_roots{0};
 
-bool remove_root_from_watched(
-    w_root_t* root /* don't care about locked state */) {
+bool watchman_root::removeFromWatched() {
   auto map = watched_roots.wlock();
-  auto it = map->find(root->root_path);
+  auto it = map->find(root_path);
   if (it == map->end()) {
     return false;
   }
   // it's possible that the root has already been removed and replaced with
   // another, so make sure we're removing the right object
-  if (it->second == root) {
+  if (it->second == this) {
     map->erase(it);
-    w_root_delref_raw(root);
+    w_root_delref_raw(this);
     return true;
   }
   return false;
@@ -142,7 +141,7 @@ bool w_root_save_state(json_ref& state) {
           obj, "path", w_string_to_json(unlocked.root->root_path));
 
       w_root_read_lock(&unlocked, "w_root_save_state", &lock);
-      auto triggers = w_root_trigger_list_to_json(&lock);
+      auto triggers = lock.root->triggerListToJson();
       w_root_read_unlock(&lock, &unlocked);
       json_object_set_new(obj, "triggers", std::move(triggers));
 
@@ -155,10 +154,10 @@ bool w_root_save_state(json_ref& state) {
   return result;
 }
 
-json_ref w_root_trigger_list_to_json(struct read_locked_watchman_root* lock) {
+json_ref watchman_root::triggerListToJson() const {
   auto arr = json_array();
   {
-    auto map = lock->root->triggers.rlock();
+    auto map = triggers.rlock();
     for (const auto& it : *map) {
       const auto& cmd = it.second;
       json_array_append(arr, cmd->definition);
@@ -209,8 +208,9 @@ bool w_root_load_state(const json_ref& state) {
           continue;
         }
 
-        auto cmd = w_build_trigger_from_def(unlocked.root, tobj, &errmsg);
-        if (!cmd) {
+        auto cmd = watchman::make_unique<watchman_trigger_command>(
+            unlocked.root, tobj, &errmsg);
+        if (errmsg) {
           w_log(
               W_LOG_ERR,
               "loading trigger for %s: %s\n",
@@ -220,12 +220,13 @@ bool w_root_load_state(const json_ref& state) {
           continue;
         }
 
+        cmd->start(unlocked.root);
         map[cmd->triggername] = std::move(cmd);
       }
     }
 
     if (created) {
-      if (!root_start(unlocked.root, &errmsg)) {
+      if (!unlocked.root->start(&errmsg)) {
         w_log(
             W_LOG_ERR,
             "root_start(%s) failed: %s\n",
@@ -246,16 +247,12 @@ void w_root_free_watched_roots(void) {
   int last, interval;
   time_t started;
 
-  // Reap any children so that we can release their
-  // references on the root
-  w_reap_children(true);
-
   {
     auto map = watched_roots.rlock();
     for (const auto& it : *map) {
       auto root = it.second;
       if (!root->cancel()) {
-        signal_root_threads(root);
+        root->signalThreads();
       }
     }
   }
@@ -278,7 +275,7 @@ void w_root_free_watched_roots(void) {
       last = current;
     }
     usleep(interval);
-    interval = MIN(interval * 2, 1000000);
+    interval = std::min(interval * 2, 1000000);
   }
 
   w_log(W_LOG_DBG, "all roots are gone\n");

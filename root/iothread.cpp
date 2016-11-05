@@ -74,10 +74,9 @@ static bool do_settle_things(struct unlocked_watchman_root* unlocked) {
   auto settledPayload = json_object({{"settled", json_true()}});
   lock.root->unilateralResponses->enqueue(std::move(settledPayload));
 
-  process_triggers(&lock);
-  if (consider_reap(&lock)) {
+  if (lock.root->considerReap()) {
     w_root_read_unlock(&lock, unlocked);
-    w_root_stop_watch(unlocked);
+    unlocked->root->stopWatch();
     return true;
   }
   w_root_read_unlock(&lock, unlocked);
@@ -143,7 +142,7 @@ void InMemoryView::ioThread(unlocked_watchman_root* unlocked) {
       if (do_settle_things(unlocked)) {
         break;
       }
-      timeoutms = MIN(biggest_timeout, timeoutms * 2);
+      timeoutms = std::min(biggest_timeout, timeoutms * 2);
       continue;
     }
 

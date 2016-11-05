@@ -46,11 +46,11 @@ static json_ref load_root_config(const char* path) {
   return res;
 }
 
-static void apply_ignore_configuration(w_root_t *root) {
+void watchman_root::applyIgnoreConfiguration() {
   uint8_t i;
   json_t *ignores;
 
-  ignores = root->config.get("ignore_dirs");
+  ignores = config.get("ignore_dirs");
   if (!ignores) {
     return;
   }
@@ -68,75 +68,61 @@ static void apply_ignore_configuration(w_root_t *root) {
     }
 
     auto name = json_to_w_string(jignore);
-    auto fullname = w_string::pathCat({root->root_path, name});
-    root->ignore.add(fullname, false);
+    auto fullname = w_string::pathCat({root_path, name});
+    ignore.add(fullname, false);
     w_log(W_LOG_DBG, "ignoring %s recursively\n", fullname.c_str());
   }
 }
 
 // internal initialization for root
-bool w_root_init(w_root_t *root, char **errmsg) {
+bool watchman_root::init(char** errmsg) {
   struct watchman_dir_handle *osdir;
 
-  osdir = w_dir_open(root->root_path.c_str());
+  osdir = w_dir_open(root_path.c_str());
   if (!osdir) {
-    ignore_result(asprintf(errmsg, "failed to opendir(%s): %s",
-          root->root_path.c_str(),
-          strerror(errno)));
+    ignore_result(asprintf(
+        errmsg,
+        "failed to opendir(%s): %s",
+        root_path.c_str(),
+        strerror(errno)));
     return false;
   }
   w_dir_close(osdir);
 
-  if (!w_watcher_init(root, errmsg)) {
+  if (!w_watcher_init(this, errmsg)) {
     return false;
   }
 
-  root->inner.number = next_root_number++;
+  inner.number = next_root_number++;
 
-  time(&root->inner.last_cmd_timestamp);
+  time(&inner.last_cmd_timestamp);
 
-  return root;
+  return true;
 }
 
 w_root_t *w_root_new(const char *path, char **errmsg) {
   auto root = new w_root_t(w_string(path, W_STRING_BYTE));
 
-  ++live_roots;
-  pthread_rwlock_init(&root->lock, NULL);
-
-  root->case_sensitive = is_case_sensitive_filesystem(path);
-
-  root->trigger_settle =
-      int(root->config.getInt("settle", DEFAULT_SETTLE_PERIOD));
-  root->gc_age = int(root->config.getInt("gc_age_seconds", DEFAULT_GC_AGE));
-  root->gc_interval =
-      int(root->config.getInt("gc_interval_seconds", DEFAULT_GC_INTERVAL));
-  root->idle_reap_age =
-      int(root->config.getInt("idle_reap_age_seconds", DEFAULT_REAP_AGE));
-
-  apply_ignore_configuration(root);
-
-  if (!apply_ignore_vcs_configuration(root, errmsg)) {
+  if (!root->applyIgnoreVCSConfiguration(errmsg)) {
     w_root_delref_raw(root);
     return nullptr;
   }
 
-  if (!w_root_init(root, errmsg)) {
+  if (!root->init(errmsg)) {
     w_root_delref_raw(root);
     return nullptr;
   }
   return root;
 }
 
-void w_root_teardown(w_root_t *root) {
+void watchman_root::tearDown() {
   // Placement delete and then new to re-init the storage.
   // We can't just delete because we need to leave things
   // in a well defined state for when we subsequently
   // delete the containing root (that will call the Inner
   // destructor).
-  root->inner.~Inner();
-  new (&root->inner)
-      watchman_root::Inner(root->root_path, root->cookies, root->config);
+  inner.~Inner();
+  new (&inner) watchman_root::Inner(root_path, cookies, config);
 }
 
 watchman_root::Inner::Inner(
@@ -171,11 +157,22 @@ void w_root_delref_raw(w_root_t *root) {
 
 watchman_root::watchman_root(const w_string& root_path)
     : root_path(root_path),
+      case_sensitive(is_case_sensitive_filesystem(root_path.c_str())),
       cookies(root_path),
       config_file(load_root_config(root_path.c_str())),
       config(config_file),
+      trigger_settle(int(config.getInt("settle", DEFAULT_SETTLE_PERIOD))),
+      gc_interval(
+          int(config.getInt("gc_interval_seconds", DEFAULT_GC_INTERVAL))),
+      gc_age(int(config.getInt("gc_age_seconds", DEFAULT_GC_AGE))),
+      idle_reap_age(
+          int(config.getInt("idle_reap_age_seconds", DEFAULT_REAP_AGE))),
       unilateralResponses(std::make_shared<watchman::Publisher>()),
-      inner(root_path, cookies, config) {}
+      inner(root_path, cookies, config) {
+  pthread_rwlock_init(&lock, nullptr);
+  ++live_roots;
+  applyIgnoreConfiguration();
+}
 
 watchman_root::~watchman_root() {
   w_log(W_LOG_DBG, "root: final ref on %s\n", root_path.c_str());

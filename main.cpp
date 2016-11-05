@@ -167,9 +167,6 @@ static void run_service(void)
 #endif
 
   w_clockspec_init();
-  // Start the reaper before we load any state; the state may
-  // have triggers associated with it which may spawn processes
-  w_start_reaper();
   w_state_load();
   res = w_start_listener(sock_name);
   w_root_free_watched_roots();
@@ -811,14 +808,14 @@ static void setup_sock_name(void)
 #endif
 
 #ifndef _WIN32
-  un.sun_family = PF_LOCAL;
-  strcpy(un.sun_path, sock_name);
-
   if (strlen(sock_name) >= sizeof(un.sun_path) - 1) {
     w_log(W_LOG_ERR, "%s: path is too long\n",
         sock_name);
     abort();
   }
+
+  un.sun_family = PF_LOCAL;
+  memcpy(un.sun_path, sock_name, strlen(sock_name) + 1);
 #endif
 }
 

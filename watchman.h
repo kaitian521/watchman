@@ -17,9 +17,6 @@ struct watchman_dir;
 struct watchman_root;
 struct watchman_pending_fs;
 struct watchman_trigger_command;
-struct write_locked_watchman_root;
-struct unlocked_watchman_root;
-struct read_locked_watchman_root;
 typedef struct watchman_root w_root_t;
 
 // Per-watch state for the selected watcher
@@ -97,25 +94,9 @@ bool w_path_exists(const char *path);
 #define IS_DIR_BIT_SET(dir) ((((intptr_t)dir) & 0x1) == 0x1)
 #define DECODE_DIR(dir)    ((void*)(((intptr_t)dir) & ~0x1))
 
-void w_mark_dead(pid_t pid);
-bool w_reap_children(bool block);
-void w_start_reaper(void);
 bool w_is_stopping(void);
-extern pthread_t reaper_thread;
 
 void w_request_shutdown(void);
-
-void w_cancel_subscriptions_for_root(const w_root_t *root);
-
-static inline uint32_t next_power_2(uint32_t n)
-{
-  n |= (n >> 16);
-  n |= (n >> 8);
-  n |= (n >> 4);
-  n |= (n >> 2);
-  n |= (n >> 1);
-  return n + 1;
-}
 
 #include "watchman_time.h"
 
@@ -127,7 +108,6 @@ void w_state_save(void);
 bool w_state_load(void);
 bool w_root_save_state(json_ref& state);
 bool w_root_load_state(const json_ref& state);
-json_ref w_root_trigger_list_to_json(struct read_locked_watchman_root* lock);
 json_ref w_root_watch_list_to_json(void);
 
 #ifdef __APPLE__
@@ -140,13 +120,6 @@ char** w_argv_copy_from_json(const json_ref& arr, int skip);
 
 #include "watchman_env.h"
 #include "watchman_getopt.h"
-
-#ifndef MIN
-# define MIN(a, b)  (a) < (b) ? (a) : (b)
-#endif
-#ifndef MAX
-# define MAX(a, b)  (a) > (b) ? (a) : (b)
-#endif
 
 #ifdef HAVE_SYS_SIGLIST
 # define w_strsignal(val) sys_siglist[(val)]

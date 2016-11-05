@@ -265,12 +265,6 @@ static void client_thread(std::shared_ptr<watchman_client> client) {
       }
     }
 
-    watchman::log(
-        watchman::DBG,
-        "will send ",
-        client->responses.size(),
-        " items to client\n");
-
     /* now send our response(s) */
     while (!client->responses.empty()) {
       auto& response_to_send = client->responses.front();
@@ -374,7 +368,7 @@ static int get_listener_socket(const char *path)
   }
 
   un.sun_family = PF_LOCAL;
-  strcpy(un.sun_path, path);
+  memcpy(un.sun_path, path, strlen(path) + 1);
   unlink(path);
 
   if (bind(listener_fd, (struct sockaddr*)&un, sizeof(un)) != 0) {
@@ -713,7 +707,7 @@ bool w_start_listener(const char *path)
         w_log(W_LOG_ERR, "waiting for %d clients to terminate\n", n_clients);
       }
       usleep(interval);
-      interval = MIN(interval * 2, max_interval);
+      interval = std::min(interval * 2, max_interval);
     } while (n_clients > 0);
   }
 
