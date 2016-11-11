@@ -3,12 +3,13 @@
 
 #ifndef WATCHMAN_QUERY_H
 #define WATCHMAN_QUERY_H
-#include <deque>
 #include <string>
 #include <vector>
 
 struct w_query;
 typedef struct w_query w_query;
+struct w_query_field_renderer;
+using w_query_field_list = std::vector<const w_query_field_renderer*>;
 
 struct w_query_since {
   bool is_timestamp;
@@ -48,7 +49,7 @@ struct w_query_ctx {
   w_string wholename;
   struct w_query_since since;
 
-  std::deque<watchman_rule_match> results;
+  json_ref resultsArray;
 
   // Cache for dir name lookups when computing wholename
   watchman_dir* last_parent{nullptr};
@@ -113,6 +114,8 @@ struct w_query {
 
   // The query that we parsed into this struct
   json_ref query_spec;
+
+  w_query_field_list fieldList;
 };
 
 typedef std::unique_ptr<QueryExpr> (
@@ -153,16 +156,17 @@ bool time_generator(
     struct w_query_ctx* ctx,
     int64_t* num_walked);
 
-struct w_query_result {
+struct w_query_res {
   bool is_fresh_instance;
-  std::deque<watchman_rule_match> results;
+  json_ref resultsArray;
+  // Only populated if the query was set to dedup_results
+  std::unordered_set<w_string> dedupedFileNames;
   uint32_t root_number;
   uint32_t ticks;
   char* errmsg{nullptr};
 
-  ~w_query_result();
+  ~w_query_res();
 };
-typedef struct w_query_result w_query_res;
 
 bool w_query_execute(
     w_query* query,
@@ -183,12 +187,6 @@ w_string_t *w_query_ctx_get_wholename(
     struct w_query_ctx *ctx
 );
 
-struct w_query_field_renderer;
-struct w_query_field_list {
-  unsigned int num_fields;
-  struct w_query_field_renderer *fields[32];
-};
-
 // parse the old style since and find queries
 std::shared_ptr<w_query> w_query_parse_legacy(
     const w_root_t* root,
@@ -198,12 +196,11 @@ std::shared_ptr<w_query> w_query_parse_legacy(
     uint32_t* next_arg,
     const char* clockspec,
     json_ref* expr_p);
-bool w_query_legacy_field_list(struct w_query_field_list *flist);
+bool w_query_legacy_field_list(w_query_field_list* flist);
 
-json_ref w_query_results_to_json(
-    struct w_query_field_list* field_list,
-    uint32_t num_results,
-    const std::deque<watchman_rule_match>& results);
+json_ref file_result_to_json(
+    const w_query_field_list& fieldList,
+    const watchman_rule_match& match);
 
 void w_query_init_all(void);
 
@@ -227,8 +224,9 @@ bool eval_int_compare(json_int_t ival, struct w_query_int_compare *comp);
 
 bool parse_field_list(
     json_ref field_list,
-    struct w_query_field_list* selected,
+    w_query_field_list* selected,
     char** errmsg);
+json_ref field_list_to_json_name_array(const w_query_field_list& fieldList);
 
 bool parse_globs(w_query* res, const json_ref& query);
 // A node in the tree of node matching rules

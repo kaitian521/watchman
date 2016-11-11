@@ -6,7 +6,6 @@
 /* find /root [patterns] */
 static void cmd_find(struct watchman_client* client, const json_ref& args) {
   char *errmsg = NULL;
-  struct w_query_field_list field_list;
   w_query_res res;
   char clockbuf[128];
   struct unlocked_watchman_root unlocked;
@@ -30,8 +29,6 @@ static void cmd_find(struct watchman_client* client, const json_ref& args) {
     return;
   }
 
-  w_query_legacy_field_list(&field_list);
-
   if (client->client_mode) {
     query->sync_timeout = std::chrono::milliseconds(0);
   }
@@ -42,14 +39,11 @@ static void cmd_find(struct watchman_client* client, const json_ref& args) {
     return;
   }
 
-  auto file_list =
-      w_query_results_to_json(&field_list, res.results.size(), res.results);
-
   auto response = make_response();
   if (clock_id_string(res.root_number, res.ticks, clockbuf, sizeof(clockbuf))) {
     response.set("clock", typed_string_to_json(clockbuf, W_STRING_UNICODE));
   }
-  response.set("files", std::move(file_list));
+  response.set("files", std::move(res.resultsArray));
 
   send_and_dispose_response(client, std::move(response));
   w_root_delref(&unlocked);

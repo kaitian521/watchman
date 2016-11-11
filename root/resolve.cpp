@@ -203,7 +203,12 @@ bool root_resolve(const char *filename, bool auto_watch, bool *created,
   }
 
   // created with 1 ref
-  root = w_root_new(watch_path, errmsg);
+  try {
+    root = new w_root_t(root_str);
+  } catch (const std::exception& e) {
+    *errmsg = strdup(e.what());
+    root = nullptr;
+  }
 
   if (watch_path != filename) {
     free(watch_path);
@@ -243,7 +248,10 @@ bool w_root_resolve(const char *filename, bool auto_watch, char **errmsg,
     return false;
   }
   if (created) {
-    if (!unlocked->root->start(errmsg)) {
+    try {
+      unlocked->root->inner.view->startThreads(unlocked->root);
+    } catch (const std::exception& e) {
+      *errmsg = strdup(e.what());
       unlocked->root->cancel();
       w_root_delref(unlocked);
       return false;

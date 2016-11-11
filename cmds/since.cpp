@@ -7,7 +7,6 @@
 static void cmd_since(struct watchman_client* client, const json_ref& args) {
   const char *clockspec;
   char *errmsg = NULL;
-  struct w_query_field_list field_list;
   w_query_res res;
   char clockbuf[128];
   struct unlocked_watchman_root unlocked;
@@ -40,23 +39,18 @@ static void cmd_since(struct watchman_client* client, const json_ref& args) {
     return;
   }
 
-  w_query_legacy_field_list(&field_list);
-
   if (!w_query_execute(query.get(), &unlocked, &res, nullptr)) {
     send_error_response(client, "query failed: %s", res.errmsg);
     w_root_delref(&unlocked);
     return;
   }
 
-  auto file_list =
-      w_query_results_to_json(&field_list, res.results.size(), res.results);
-
   auto response = make_response();
   if (clock_id_string(res.root_number, res.ticks, clockbuf, sizeof(clockbuf))) {
     response.set("clock", typed_string_to_json(clockbuf, W_STRING_UNICODE));
   }
   response.set({{"is_fresh_instance", json_boolean(res.is_fresh_instance)},
-                {"files", std::move(file_list)}});
+                {"files", std::move(res.resultsArray)}});
 
   {
     struct read_locked_watchman_root lock;

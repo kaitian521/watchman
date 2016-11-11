@@ -108,7 +108,8 @@ void test_suffix() {
   ok(w_string(".").suffix() == w_string(""), "only one dot suffix");
   ok(w_string("endwithdot.").suffix() == w_string(""), "end with dot");
   ok(!w_string("nosuffix").suffix(), "no suffix");
-  ok(w_string(".beginwithdot").suffix() == w_string("beginwithdot"), "begin with dot");
+  ok(w_string(".beginwithdot").suffix() == w_string("beginwithdot"),
+     "begin with dot");
   ok(w_string("MainActivity.java").suffix() == w_string("java"), "java suffix");
 
   std::string longName(128, 'a');

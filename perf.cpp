@@ -18,10 +18,6 @@ watchman_perf_sample::watchman_perf_sample(const char* description)
 #endif
 }
 
-watchman_perf_sample::~watchman_perf_sample() {
-  memset(this, 0, sizeof(*this));
-}
-
 bool watchman_perf_sample::finish() {
   gettimeofday(&time_end, nullptr);
   w_timeval_sub(time_end, time_begin, &duration);
@@ -99,8 +95,8 @@ void watchman_perf_sample::add_root_meta(const w_root_t* root) {
            // we do need to guard against a NULL pointer value.
            {"watcher",
             w_string_to_json(w_string(
-                root->inner.watcher ? root->inner.watcher->name
-                                    : "<recrawling>",
+                root->inner.view->watcher ? root->inner.view->watcher->name
+                                          : "<recrawling>",
                 W_STRING_UNICODE))}}));
 }
 

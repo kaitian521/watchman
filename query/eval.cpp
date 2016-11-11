@@ -41,7 +41,7 @@ w_string_t *w_query_ctx_get_wholename(
   }
 
   auto full_name = w_string::pathCat(
-      {compute_parent_path(ctx, ctx->file), w_file_get_name(ctx->file)});
+      {compute_parent_path(ctx, ctx->file), ctx->file->getName()});
 
   // Record the name relative to the root
   ctx->wholename = full_name.slice(name_start, full_name.size() - name_start);
@@ -88,11 +88,15 @@ bool w_query_process_file(
   } else {
     is_new = file->ctime.ticks > ctx->since.clock.ticks;
   }
-  ctx->results.emplace_back(
+
+  watchman_rule_match match(
       ctx->lock->root->inner.number,
       w_query_ctx_get_wholename(ctx),
       is_new,
       file);
+
+  json_array_append_new(
+      ctx->resultsArray, file_result_to_json(ctx->query->fieldList, match));
 
   return true;
 }
@@ -203,7 +207,7 @@ done:
   return result;
 }
 
-w_query_result::~w_query_result() {
+w_query_res::~w_query_res() {
   free(errmsg);
 }
 
@@ -241,19 +245,26 @@ static bool execute_common(
         json_object(
             {{"fresh_instance", json_boolean(res->is_fresh_instance)},
              {"num_deduped", json_integer(ctx->num_deduped)},
-             {"num_results", json_integer(int64_t(ctx->results.size()))},
+             {"num_results", json_integer(json_array_size(ctx->resultsArray))},
              {"num_walked", json_integer(num_walked)},
              {"query", ctx->query->query_spec}}));
     sample->log();
   }
 
-  res->results = std::move(ctx->results);
+  res->resultsArray = ctx->resultsArray;
+  res->dedupedFileNames = std::move(ctx->dedup);
 
   return result;
 }
 
 w_query_ctx::w_query_ctx(w_query* q, read_locked_watchman_root* lock)
-    : query(q), lock(lock) {}
+    : query(q), lock(lock), resultsArray(json_array()) {
+  // build a template for the serializer
+  if (query->fieldList.size() > 1) {
+    json_array_set_template_new(
+        resultsArray, field_list_to_json_name_array(query->fieldList));
+  }
+}
 
 w_query_ctx::~w_query_ctx() {
   if (last_parent_path) {
@@ -268,7 +279,6 @@ bool w_query_execute_locked(
     w_query_generator generator) {
   w_query_ctx ctx(query, lock);
 
-  memset(res, 0, sizeof(*res));
   w_perf_t sample("query_execute");
 
   /* The first stage of execution is generation.
@@ -300,7 +310,6 @@ bool w_query_execute(
   bool result;
 
   w_query_ctx ctx(query, nullptr);
-  memset(res, 0, sizeof(*res));
 
   w_perf_t sample("query_execute");
 
